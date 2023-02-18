@@ -169,11 +169,6 @@ global _plugin
 _plugin = BasePlugin()
 
 
-def onStart():
-    global _plugin
-    _plugin.onStart()
-
-
 def onStop():
     global _plugin
     _plugin.onStop()
@@ -206,4 +201,3 @@ def DumpConfigToLog():
         Domoticz.Log("Device sValue:   '" + Devices[x].sValue + "'")
         Domoticz.Log("Device LastLevel: " + str(Devices[x].LastLevel))
     return
-
