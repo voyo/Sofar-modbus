@@ -28,7 +28,7 @@ Requirements:
 """
 
 import Domoticz
-port minimalmodbus
+import minimalmodbus
 import serial
 
 class BasePlugin:
