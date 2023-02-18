@@ -31,6 +31,8 @@ import Domoticz
 import minimalmodbus
 import serial
 
+
+
 class BasePlugin:
     def __init__(self):
         self.runInterval = 1
@@ -159,4 +161,49 @@ class BasePlugin:
         for dev in Devices:
             if (Devices[dev].DeviceID in [d.DeviceID for d in self.devices]):
                 self.readDevice(Devices[dev].DeviceID)
+
+
+
+
+global _plugin
+_plugin = BasePlugin()
+
+
+def onStart():
+    global _plugin
+    _plugin.onStart()
+
+
+def onStop():
+    global _plugin
+    _plugin.onStop()
+
+
+def onHeartbeat():
+    global _plugin
+    Domoticz.Log("onHeartbeat called")
+    _plugin.onHeartbeat()
+
+
+def onCommand(Unit, Command, Level, Hue):
+    global _plugin
+    Domoticz.Log("onCommand called")
+    _plugin.onCommand(Unit, Command, Level, Hue)
+
+   
+
+# Generic helper functions
+def DumpConfigToLog():
+    for x in Parameters:
+        if Parameters[x] != "":
+            Domoticz.Log("'" + x + "':'" + str(Parameters[x]) + "'")
+    Domoticz.Log("Device count: " + str(len(Devices)))
+    for x in Devices:
+        Domoticz.Log("Device:           " + str(x) + " - " + str(Devices[x]))
+        Domoticz.Log("Device ID:       '" + str(Devices[x].ID) + "'")
+        Domoticz.Log("Device Name:     '" + Devices[x].Name + "'")
+        Domoticz.Log("Device nValue:    " + str(Devices[x].nValue))
+        Domoticz.Log("Device sValue:   '" + Devices[x].sValue + "'")
+        Domoticz.Log("Device LastLevel: " + str(Devices[x].LastLevel))
+    return
 
