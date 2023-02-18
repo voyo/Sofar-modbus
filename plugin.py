@@ -31,6 +31,42 @@ import Domoticz
 import minimalmodbus
 import serial
 
+class Dev:
+    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0  ):
+        self.ID = ID
+        self.name = name
+        self.TypeName = TypeName if TypeName is not None else ""
+        self.Type = Type
+        self.SubType = SubType
+        self.SwitchType = SwitchType
+        self.nod = nod
+        self.value = 0
+        self.signed = signed 
+        self.register = register
+        self.functioncode = functioncode
+        self.options = options if options is not None else None
+        self.Used=Used
+        self.Description = Description if Description is not None else ""
+        if self.ID not in Devices:
+            msg = "Registering device: "+self.name+" "+str(self.ID)+" "+self.TypeName+"  Description: "+str(self.Description);
+            Domoticz.Log(msg)        
+            if self.TypeName != "":
+                 Domoticz.Log("adding Dev with TypeName, "+self.TypeName)
+                 Domoticz.Device(Name=self.name, Unit=self.ID, TypeName=self.TypeName,Used=self.Used,Options=self.options,Description=self.Description).Create()
+            else:
+                 Domoticz.Device(Name=self.name, Unit=self.ID,Type=self.Type, Subtype=self.SubType, Switchtype=self.SwitchType, Used=self.Used,Options=self.options,Description=self.Description).Create()
+                 Domoticz.Log("adding Dev with Type, "+str(self.Type))
+                      
+
+    def UpdateSensorValue(self,RS485):
+                 if self.functioncode == 3 or self.functioncode == 4:
+                     payload = RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                 Domoticz.Log("DEV.UPDATUJE wartosc z rejestru: "+str(self.register)+" value: "+str(payload)+" signed: "+str(self.signed))
+                 data = payload
+                 Devices[self.ID].Update(0,str(data)+';0',True) # force update, even if the voltage has no changed. 
+                 if Parameters["Mode6"] == 'Debug':
+                     Domoticz.Log("Device:"+self.name+" data="+str(data)+" from register: "+str(hex(self.register)) )                 
+                    
 
 
 class BasePlugin:
