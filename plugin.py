@@ -1,20 +1,31 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# This file is part of Sofar-modbus.
-# Sofar-modbus is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# Sofar-modbus is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# You should have received a copy of the GNU General Public License
-# along with Sofar-modbus.  If not, see <http://www.gnu.org/licenses/>.
-# Author: 2023 Wojciech Sawaściuk  <voyo@no-ip.pl>
-# Version: 0.1
-# Date: 2023-02-18
-# Description: Plugin for Sofar-modbus
+"""
+Sofar Domoticz plugin.
+
+Author: Wojtek Sawasciuk  <voyo@no-ip.pl>
+
+Requirements: 
+    1.python module minimalmodbus -> http://minimalmodbus.readthedocs.io/en/master/
+        (pi@raspberrypi:~$ sudo pip3 install minimalmodbus)
+    2.Communication module Modbus USB to RS485 converter module
+"""
+"""
+<plugin key="Sofar" name="Sofar" version="0.1" author="voyo@no-ip.pl">
+    <params>
+        <param field="SerialPort" label="Modbus Port" width="200px" required="true" default="/dev/ttyUSB0" />
+        <param field="Mode1" label="Baud rate" width="40px" required="true" default="9600"  />
+        <param field="Mode2" label="Device ID" width="40px" required="true" default="1" />
+        <param field="Mode3" label="Reading Interval min." width="40px" required="true" default="1" />
+        <param field="Mode6" label="Debug" width="75px">
+            <options>
+                <option label="True" value="Debug"/>
+                <option label="False" value="Normal"  default="false" />
+            </options>
+        </param>
+    </params>
+</plugin>
+
+"""
 
 import Domoticz
 port minimalmodbus
