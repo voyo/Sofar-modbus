@@ -193,11 +193,35 @@ class BasePlugin:
         Domoticz.Debugging(0)
         Domoticz.Debug("onStop called")
 
+    
     def onHeartbeat(self):
-        Domoticz.Debug("onHeartbeat called")
-        for dev in Devices:
-            if (Devices[dev].DeviceID in [d.DeviceID for d in self.devices]):
-                self.readDevice(Devices[dev].DeviceID)
+        self.runInterval -=1;
+        if self.runInterval <= 0:
+            for i in self.sensors:
+                try:
+                         # Get data from modbus
+                        Domoticz.Log("Getting data from modbus for device:"+i.name+" ID:"+str(i.ID))
+                        self.sensors[i.ID-1].UpdateSensorValue(self.RS485)
+                except Exception as e:
+                        Domoticz.Log("Update failure: "+str(e));
+                else:
+                        if Parameters["Mode6"] == 'Debug':
+                            Domoticz.Log("in HeartBeat "+i.name+": "+format(i.value))
+            self.runInterval = int(Parameters["Mode3"])
+
+            for i in self.settings:
+                l = len(self.settings)
+                dev_len=len(self.sensors)
+                try:
+                         # Get data from modbus
+                        Domoticz.Log("Getting data from modbus for device:"+i.name+" ID:"+str(i.ID))
+                        self.settings[i.ID-1-50].UpdateSettingValue(self.RS485)
+                except Exception as e:
+                        Domoticz.Log("Update failure: "+str(e));
+                else:
+                        if Parameters["Mode6"] == 'Debug':
+                            Domoticz.Log("in HeartBeat "+i.name+": "+format(i.value))
+            self.runInterval = int(Parameters["Mode3"]) 
 
 
 
