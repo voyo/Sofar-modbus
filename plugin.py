@@ -206,6 +206,11 @@ global _plugin
 _plugin = BasePlugin()
 
 
+def onStart():
+    global _plugin
+    _plugin.onStart()
+
+
 def onStop():
     global _plugin
     _plugin.onStop()
