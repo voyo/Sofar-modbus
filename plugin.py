@@ -32,7 +32,7 @@ import minimalmodbus
 import serial
 
 class Dev:
-    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0  ):
+    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0  , options=None):
         self.ID = ID
         self.name = name
         self.TypeName = TypeName if TypeName is not None else ""
@@ -105,7 +105,8 @@ class BasePlugin:
                 Dev(12,"GenerationTime_Today",0,1062,functioncode=3,TypeName="Counter",SubType=5,Description="GenerationTime_Today"),
                 Dev(13,"GenerationTime_Total",0,1063,functioncode=3,TypeName="Counter",SubType=5,Description="GenerationTime_Total"),
                 Dev(14,"ServiceTime_Total",0,1064,functioncode=3,TypeName="Counter",SubType=5,Description="ServiceTime_Total"),
-                Dev(15,"Frequency_grid",2,1156,functioncode=3,TypeName="Frequency",Description="Frequency_grid"),
+                Dev(15,"Frequency_grid",2,1156,functioncode=3,TypeName="Custom",Description="Frequency_grid",{ "Custom" : "1;Hz"}),
+
                 Dev(16,"ActivePower_Output_Total",0,1157,functioncode=3,TypeName="Usage",Description="ActivePower_Output_Total",signed=True),
                 Dev(17,"ReactivePower_Output_Total",0,1158,functioncode=3,TypeName="Usage",Description="ReactivePower_Output_Total",signed=True),
                 Dev(18,"ApparentPower_Output_Total",0,1159,functioncode=3,TypeName="Usage",Description="ApparentPower_Output_Total"),
