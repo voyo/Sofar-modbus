@@ -180,9 +180,9 @@ class BasePlugin:
                 Dev(79,"Current_PV4",0,1422,functioncode=3,TypeName="Current",Description="Current_PV4"),
                 Dev(80,"Power_PV4",0,1423,functioncode=3,TypeName="Usage",Description="Power_PV4",signed=True),
     # PV Generation Today
-                Dev(81,"PV_Generation_Today",2,1668,functioncode=3,TypeName="Usage",Description="PV_Generation_Today",signed=True),
+                Dev(81,"PV_Generation_Today",0,1668,functioncode=3,TypeName="Usage",Description="PV_Generation_Today",signed=True),
     # PV Generation Total
-                Dev(82,"PV_Generation_Total",2,1670,functioncode=3,TypeName="Usage",Description="PV_Generation_Total",signed=True),
+                Dev(82,"PV_Generation_Total",0,1670,functioncode=3,TypeName="Usage",Description="PV_Generation_Total",signed=True),
     # load consumption
                 Dev(83,"Load_Consumption_Today",2,1672,functioncode=3,TypeName="Usage",Description="Load_Consumption_Today",signed=True),
                 Dev(84,"Load_Consumption_Total",2,1674,functioncode=3,TypeName="Usage",Description="Load_Consumption_Total",signed=True)
