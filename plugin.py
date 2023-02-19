@@ -32,7 +32,7 @@ import minimalmodbus
 import serial
 
 class Dev:
-    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0 ):
+    def __init__(self,ID,name,nod,register,size=1,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0 ):
         self.ID = ID
         self.name = name
         self.TypeName = TypeName if TypeName is not None else ""
@@ -43,6 +43,7 @@ class Dev:
         self.value = 0
         self.signed = signed 
         self.register = register
+        self.size = size if size is None else 1
         self.functioncode = functioncode
         self.options = options if options is not None else None
         self.Used=Used
@@ -61,7 +62,11 @@ class Dev:
 
     def UpdateSensorValue(self,RS485):
                  if self.functioncode == 3 or self.functioncode == 4:
-                     payload = RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                    if self.size == 1:
+                        payload = RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                    elif self.size == 2:
+                        payload = RS485.read_long(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                        
                  Domoticz.Log("DEV.UPDATUJE wartosc z rejestru: "+str(self.register)+" value: "+str(payload)+" signed: "+str(self.signed))
                  data = payload
                  Devices[self.ID].Update(0,str(data)+';0',True) # force update, even if the voltage has no changed. 
