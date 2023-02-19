@@ -182,7 +182,7 @@ class BasePlugin:
     # PV Generation Today
                 Dev(81,"PV_Generation_Today",2,1668,functioncode=3,TypeName="Usage",Description="PV_Generation_Today",signed=False),
     # PV Generation Total
-                Dev(82,"PV_Generation_Total",0,1670,functioncode=3,TypeName="Usage",Description="PV_Generation_Total",signed=False,
+                Dev(82,"PV_Generation_Total",0,1670,functioncode=3,TypeName="Usage",Description="PV_Generation_Total",signed=False),
     # load consumption
                 Dev(83,"Load_Consumption_Today",2,1672,functioncode=3,TypeName="Usage",Description="Load_Consumption_Today",signed=True),
                 Dev(84,"Load_Consumption_Total",2,1674,functioncode=3,TypeName="Usage",Description="Load_Consumption_Total",signed=True)
