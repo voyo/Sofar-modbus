@@ -47,6 +47,7 @@ class Dev:
         self.options = options if options is not None else None
         self.Used=Used
         self.Description = Description if Description is not None else ""
+        Domoticz.Log("DEV: "+self.name+" "+str(self.ID)+" "+self.TypeName+"  Description: "+str(self.Description))
         if self.ID not in Devices:
             msg = "Registering device: "+self.name+" "+str(self.ID)+" "+self.TypeName+"  Description: "+str(self.Description);
             Domoticz.Log(msg)        
