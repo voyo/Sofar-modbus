@@ -32,7 +32,7 @@ import minimalmodbus
 import serial
 
 class Dev:
-    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0  , options=None):
+    def __init__(self,ID,name,nod,register,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0 ):
         self.ID = ID
         self.name = name
         self.TypeName = TypeName if TypeName is not None else ""
