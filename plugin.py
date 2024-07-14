@@ -244,7 +244,7 @@ class BasePlugin:
     def onHeartbeat(self):
         Domoticz.Log("onHeartbeat called")
         for dev in self.sensors:
-            dev.UpdateValue(self.modbusClient, Parameters["Mode4"] == "TCP")
+            dev.UpdateSensorValue(self.modbusClient, Parameters["Mode4"] == "TCP")
             if dev.ID in Devices:
                 Devices[dev.ID].Update(nValue=0, sValue=str(dev.value))
 
