@@ -10,12 +10,21 @@ Requirements:
     2.Communication module Modbus USB to RS485 converter module
 """
 """
-<plugin key="Sofar" name="Sofar" version="0.1" author="voyo@no-ip.pl">
+<plugin key="Sofar" name="Sofar" version="0.2" author="voyo@no-ip.pl">
     <params>
         <param field="SerialPort" label="Modbus Port" width="200px" required="true" default="/dev/ttyUSB0" />
+        <param field="Address" label="IP Address" width="200px" required="true" default="127.0.0.1"/>
+        <param field="Port" label="Port" width="30px" required="true" default="502"/>
         <param field="Mode1" label="Baud rate" width="40px" required="true" default="9600"  />
         <param field="Mode2" label="Device ID" width="40px" required="true" default="1" />
         <param field="Mode3" label="Reading Interval min." width="40px" required="true" default="1" />
+        <param field="Mode4" label="Modbus type" width="75px">
+            <description><h2>Modbus type</h2>Select the desired type of modbus connection</description>
+            <options>
+                <option label="TCP" value="TCP" default="true" />
+                <option label="RTU" value="RTU" />
+            </options>
+        </param>
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="True" value="Debug"/>
@@ -24,12 +33,17 @@ Requirements:
         </param>
     </params>
 </plugin>
-
 """
+
 
 import Domoticz
 import minimalmodbus
 import serial
+
+# for TCP modbus connection
+from pyModbusTCP.client import ModbusClient
+from pymodbus.constants import Endian
+from pymodbus.payload import BinaryPayloadDecoder
 
 class Dev:
     def __init__(self,ID,name,nod,register,size=1,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0 ):
@@ -61,6 +75,24 @@ class Dev:
                       
 
     def UpdateSensorValue(self,RS485):
+        if isTCP: #pyModbus
+            Domoticz.Log("modbus client: "+str(modbusClient))
+            result = modbusClient.read_holding_registers(self.register, self.size)
+            Domoticz.Log("TCP Modbus read: register=" + str(self.register) + " size=" + str(self.size) + " functioncode=" + str(self.functioncode))
+            Domoticz.Log("value: "+str(result))
+            if result:
+                self.value = result[0]
+#                while True:
+#                   try:
+#                       value = BinaryPayloadDecoder.fromRegisters(RS485.read_holding_registers(self.register, self.size), byteorder=Endian.BIG, wordorder=Endian.BIG).decode_16bit_int()
+#                       payload = value * self.multipler  # decimal places
+#                   except Exception as e:
+#                      Domoticz.Log("Modbus connection failure 2: "+str(e))
+#                      Domoticz.Log("retry updating register in 2 s")
+#                      sleep(2.0)
+#                      continue
+#                   break
+        else:   # minimalmodbus      
                  if self.functioncode == 3 or self.functioncode == 4:
                     if self.size == 1:
                         payload = RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
@@ -77,19 +109,29 @@ class Dev:
 
 class BasePlugin:
     def __init__(self):
-        self.runInterval = 1
+        self.runInterval = 6  # Default to 1 minute
         self.RS485 = ""
         return
 
     def onStart(self):
-        self.RS485 = minimalmodbus.Instrument(Parameters["SerialPort"], int(Parameters["Mode2"]))
-        self.RS485.serial.baudrate = Parameters["Mode1"]
-        self.RS485.serial.bytesize = 8
-        self.RS485.serial.parity = minimalmodbus.serial.PARITY_NONE
-        self.RS485.serial.stopbits = 1
-        self.RS485.serial.timeout = 1
-        self.RS485.debug = False
-        self.RS485.mode = minimalmodbus.MODE_RTU
+        DeviceID= int(Parameters["Mode2"])
+        if Parameters["Mode6"] == 'Debug':
+            Domoticz.Debugging(1)
+            Domoticz.Debug("Debugging mode is enabled")
+# Set up the Modbus client based on selected connection type
+        if Parameters["Mode4"] == "TCP":
+            self.modbusClient = ModbusClient(host=Parameters["Address"], port=int(Parameters["Port"]), unit_id=int(DeviceID), auto_open=True, debug=True)
+            Domoticz.Log("Modbus TCP client created")
+        else:
+            self.modbusClient = None
+            self.RS485 = minimalmodbus.Instrument(Parameters["SerialPort"], int(Parameters["Mode2"]))
+            self.RS485.serial.baudrate = Parameters["Mode1"]
+            self.RS485.serial.bytesize = 8
+            self.RS485.serial.parity = minimalmodbus.serial.PARITY_NONE
+            self.RS485.serial.stopbits = 1
+            self.RS485.serial.timeout = 1
+            self.RS485.debug = False
+            self.RS485.mode = minimalmodbus.MODE_RTU
         
         devicecreated = []
         Domoticz.Log("Sofar-Modbus plugin start")
