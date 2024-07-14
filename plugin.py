@@ -73,8 +73,8 @@ class Dev:
                  Domoticz.Device(Name=self.name, Unit=self.ID,Type=self.Type, Subtype=self.SubType, Switchtype=self.SwitchType, Used=self.Used,Options=self.options,Description=self.Description).Create()
                  Domoticz.Log("adding Dev with Type, "+str(self.Type))
                       
-
-    def UpdateSensorValue(self,RS485):
+    def UpdateSensorValue(self, modbusClient, isTCP):
+#    def UpdateSensorValue(self,RS485):
         if isTCP: #pyModbus
             Domoticz.Log("modbus client: "+str(modbusClient))
             result = modbusClient.read_holding_registers(self.register, self.size)
@@ -242,34 +242,11 @@ class BasePlugin:
 
     
     def onHeartbeat(self):
-        self.runInterval -=1;
-        if self.runInterval <= 0:
-            for i in self.sensors:
-                try:
-                         # Get data from modbus
-                        Domoticz.Log("Getting data from modbus for device:"+i.name+" ID:"+str(i.ID))
-                        self.sensors[i.ID-1].UpdateSensorValue(self.RS485)
-                except Exception as e:
-                        Domoticz.Log("Update failure: "+str(e));
-                else:
-                        if Parameters["Mode6"] == 'Debug':
-                            Domoticz.Log("in HeartBeat "+i.name+": "+format(i.value))
-            self.runInterval = int(Parameters["Mode3"])
-
-            for i in self.settings:
-                l = len(self.settings)
-                dev_len=len(self.sensors)
-                try:
-                         # Get data from modbus
-                        Domoticz.Log("Getting data from modbus for device:"+i.name+" ID:"+str(i.ID))
-                        self.settings[i.ID-1-50].UpdateSettingValue(self.RS485)
-                except Exception as e:
-                        Domoticz.Log("Update failure: "+str(e));
-                else:
-                        if Parameters["Mode6"] == 'Debug':
-                            Domoticz.Log("in HeartBeat "+i.name+": "+format(i.value))
-            self.runInterval = int(Parameters["Mode3"]) 
-
+        Domoticz.Log("onHeartbeat called")
+        for dev in self.devs:
+            dev.UpdateValue(self.modbusClient, Parameters["Mode4"] == "TCP")
+            if dev.ID in Devices:
+                Devices[dev.ID].Update(nValue=0, sValue=str(dev.value))
 
 
 
