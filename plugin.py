@@ -46,7 +46,7 @@ from pymodbus.constants import Endian
 from pymodbus.payload import BinaryPayloadDecoder
 
 class Dev:
-    def __init__(self,ID,name,nod,register,size=1,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0 ):
+    def __init__(self,ID,name,nod,register,size=1,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0, multipler=1):
         self.ID = ID
         self.name = name
         self.TypeName = TypeName if TypeName is not None else ""
@@ -58,6 +58,7 @@ class Dev:
         self.signed = signed 
         self.register = register
         self.size = size if size is None else 1
+        self.multipler = multipler        
         self.functioncode = functioncode
         self.options = options if options is not None else None
         self.Used=Used
@@ -81,7 +82,8 @@ class Dev:
             Domoticz.Log("TCP Modbus read: register=" + str(self.register) + " size=" + str(self.size) + " functioncode=" + str(self.functioncode))
             Domoticz.Log("value: "+str(result))
             if result:
-                self.value = result[0]
+                 # Apply the multipler before updating the value
+=                self.value = result[0] * self.multipler
 #                while True:
 #                   try:
 #                       value = BinaryPayloadDecoder.fromRegisters(RS485.read_holding_registers(self.register, self.size), byteorder=Endian.BIG, wordorder=Endian.BIG).decode_16bit_int()
@@ -100,7 +102,8 @@ class Dev:
                         payload = RS485.read_long(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
                         
                  Domoticz.Log("DEV.UPDATUJE wartosc z rejestru: "+str(self.register)+" value: "+str(payload)+" signed: "+str(self.signed))
-                 data = payload
+                 data = payload * self.multipler
+         
                  Devices[self.ID].Update(0,str(data)+';0',True) # force update, even if the voltage has no changed. 
                  if Parameters["Mode6"] == 'Debug':
                      Domoticz.Log("Device:"+self.name+" data="+str(data)+" from register: "+str(hex(self.register)) )                 
@@ -149,11 +152,13 @@ class BasePlugin:
                 Dev(9,"Temperature_Inv1",0,1056,functioncode=3,TypeName="Temperature",Description="Temperature_Inv1",signed=True),
                 Dev(10,"Temperature_Inv2",0,1057,functioncode=3,TypeName="Temperature",Description="Temperature_Inv2",signed=True),
                 Dev(11,"Temperature_Inv3",0,1058,functioncode=3,TypeName="Temperature",Description="Temperature_Inv3",signed=True),
+                
                 Dev(12,"GenerationTime_Today",0,1062,functioncode=3,TypeName="Counter",SubType=5,Description="GenerationTime_Today"),
                 Dev(13,"GenerationTime_Total",0,1063,functioncode=3,TypeName="Counter",SubType=5,Description="GenerationTime_Total"),
                 Dev(14,"ServiceTime_Total",0,1064,functioncode=3,TypeName="Counter",SubType=5,Description="ServiceTime_Total"),
+
                 Dev(15,"Frequency_grid",2,1156,functioncode=3,TypeName="Custom",Description="Frequency_grid",options={ "Custom" : "1;Hz"}),
-                Dev(16,"ActivePower_Output_Total",0,1157,functioncode=3,TypeName="Usage",Description="ActivePower_Output_Total",signed=True),
+                Dev(16,"ActivePower_Output_Total",0,1157,functioncode=3,Type=250,SubType=1,Description="ActivePower_Output_Total",signed=True),
                 Dev(17,"ReactivePower_Output_Total",0,1158,functioncode=3,TypeName="Usage",Description="ReactivePower_Output_Total",signed=True),
                 Dev(18,"ApparentPower_Output_Total",0,1159,functioncode=3,TypeName="Usage",Description="ApparentPower_Output_Total"),
                 Dev(19,"ActivePower_PCC_Total",0,1160,functioncode=3,TypeName="Usage",Description="ActivePower_PCC_Total",signed=True),
