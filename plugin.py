@@ -134,13 +134,13 @@ class Dev:
                 Domoticz.Log(f"TCP Modbus read failed for {self.name}: {str(e)}")
                 return
                 
-        else:   # minimalmodbus
+        else:   # minimalmodbus - need access to outerClass.RS485
             try:
                 if self.functioncode == 3 or self.functioncode == 4:
                     if self.size == 1:
-                        payload = RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                        payload = outerClass.RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
                     elif self.size == 2:
-                        payload = RS485.read_long(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                        payload = outerClass.RS485.read_long(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
 
                 Domoticz.Log("DEV.UPDATUJE wartosc z rejestru: "+str(self.register)+" value: "+str(payload)+" signed: "+str(self.signed))
                 data = payload * self.multipler
@@ -196,6 +196,8 @@ class BasePlugin:
     def __init__(self):
         self.runInterval = 1
         self.RS485 = ""
+        self.modbusClient = None
+        self.sensors = []  # Initialize empty sensors list
         # Active power for last 5 minutes
         self.active_power=Average()
         # Reactive power for last 5 minutes
@@ -216,7 +218,7 @@ class BasePlugin:
             
         # Set up the Modbus client based on selected connection type
         if Parameters["Mode4"] == "TCP":
-            self.modbusClient = ModbusClient(host=Parameters["Address"], port=int(Parameters["Port"]), unit_id=int(DeviceID), auto_open=True, debug=True)
+            self.modbusClient = ModbusClient(host=Parameters["Address"], port=int(Parameters["Port"]), unit_id=int(DeviceID), auto_open=True)
             Domoticz.Log("Modbus TCP client created")
         else:
             self.modbusClient = None
@@ -330,3 +332,4 @@ def DumpConfigToLog():
         Domoticz.Log("Device sValue:   '" + Devices[x].sValue + "'")
         Domoticz.Log("Device LastLevel: " + str(Devices[x].LastLevel))
     return
+
