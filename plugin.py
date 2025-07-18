@@ -190,7 +190,14 @@ class Dev:
             Devices[self.ID].Update(nValue=1,sValue=str(USAGE1+';'+USAGE2+';'+RETURN1+';'+RETURN2+';'+CONS+';'+PROD) )
         else:
             Domoticz.Debug("DEBUG. ELSE, ID="+str(self.ID))
-            Devices[self.ID].Update(sValue=str(data),nValue=int(data))
+            # Special handling for P1 Smart Meter devices (Type 250)
+            if self.Type == 250:
+                # P1 Smart Meter requires sValue format: "usage1;usage2;return1;return2;cons;prod"
+                sValue = f"0;0;0;0;{data};0"
+                Devices[self.ID].Update(nValue=0, sValue=sValue)
+                Domoticz.Debug(f"P1 Smart Meter update: {self.name} = {sValue}")
+            else:
+                Devices[self.ID].Update(sValue=str(data),nValue=int(data))
 
 class BasePlugin:
     def __init__(self):
@@ -332,4 +339,3 @@ def DumpConfigToLog():
         Domoticz.Log("Device sValue:   '" + Devices[x].sValue + "'")
         Domoticz.Log("Device LastLevel: " + str(Devices[x].LastLevel))
     return
-
