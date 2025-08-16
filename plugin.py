@@ -1,8 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Sofar Domoticz plugin.
+Sofar Inverter Domoticz plugin.
 
-Author: Wojtek Sawasciuk  <voyo@no-ip.pl>
+Author: Wojtek Sawasciuk <voyo@no-ip.pl>
+Version: 0.4.0
 
 Requirements:
     1.python module minimalmodbus -> http://minimalmodbus.readthedocs.io/en/master/
@@ -10,7 +12,7 @@ Requirements:
     2.Communication module Modbus USB to RS485 converter module
 """
 """
-<plugin key="Sofar" name="Sofar" version="0.3" author="voyo@no-ip.pl">
+<plugin key="Sofar" name="Sofar" version="0.4.0" author="voyo@no-ip.pl">
     <params>
         <param field="SerialPort" label="Modbus Port" width="200px" required="true" default="/dev/ttyUSB0" />
         <param field="Address" label="IP Address" width="200px" required="true" default="127.0.0.1"/>
@@ -28,51 +30,164 @@ Requirements:
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="True" value="Debug"/>
-                <option label="False" value="Normal"  default="false" />
+                <option label="False" value="Normal" default="false" />
             </options>
         </param>
     </params>
 </plugin>
 """
 
-import Domoticz
-import minimalmodbus
-import serial
+import sys
+import os
+import time
 
-# for TCP modbus connection
-from pyModbusTCP.client import ModbusClient
-from pymodbus.constants import Endian
+# Add current directory to path for Domoticz
+plugin_dir = os.path.dirname(os.path.abspath(__file__))
+if plugin_dir not in sys.path:
+    sys.path.insert(0, plugin_dir)
 
-# Domoticz shows graphs with intervals of 5 minutes.
-# When collecting information from the inverter more frequently than that, then it makes no sense to only show the last value.
-#
-# The Average class can be used to calculate the average value based on a sliding window of samples.
-# The number of samples stored depends on the interval used to collect the value from the inverter itself.
-#
-# borrowed from https://github.com/xbeaudouin/domoticz-ds238-modbus-tcp
-class Average:
+try:
+    import Domoticz
+except ImportError:
+    print("Error: Domoticz module not available")
+    sys.exit(1)
+
+# Import Modbus modules with error handling
+minimalmodbus = None
+serial = None
+ModbusClient = None
+
+try:
+    import minimalmodbus
+    import serial
+except ImportError as e:
+    Domoticz.Log(f"Warning: minimalmodbus not available: {e}")
+
+try:
+    from pyModbusTCP.client import ModbusClient
+except ImportError as e:
+    Domoticz.Log(f"Warning: pyModbusTCP not available: {e}")
+
+try:
+    from pymodbus.constants import Endian
+except ImportError:
+    Endian = None
+
+# ==============================================================================
+# LOGGER CLASS - Unified logging
+# ==============================================================================
+class Logger:
+    """Unified logger with consistent formatting and debug mode support"""
+    
+    # ANSI color codes for debug mode
+    BLUE = '\033[94m'
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RESET = '\033[0m'
+    
     def __init__(self):
+        self.debug_mode = False
+    
+    def set_debug_mode(self, enabled):
+        """Enable or disable debug mode"""
+        self.debug_mode = enabled
+        if enabled:
+            Domoticz.Debugging(1)
+        else:
+            Domoticz.Debugging(0)
+    
+    def _log(self, message, level="INFO", color=None):
+        """Internal logging method"""
+        if self.debug_mode and color:
+            formatted_msg = f"{color}{message}{self.RESET}"
+        else:
+            formatted_msg = message
+        
+        if level == "ERROR":
+            Domoticz.Error(formatted_msg)
+        elif level == "DEBUG":
+            if self.debug_mode:
+                Domoticz.Debug(formatted_msg)
+        else:
+            Domoticz.Log(formatted_msg)
+    
+    def info(self, message):
+        """Log info message"""
+        self._log(message, "INFO")
+    
+    def error(self, message):
+        """Log error message"""
+        self._log(message, "ERROR", self.RED if self.debug_mode else None)
+    
+    def debug(self, message):
+        """Log debug message (only in debug mode)"""
+        if self.debug_mode:
+            self._log(message, "DEBUG")
+    
+    def warning(self, message):
+        """Log warning message"""
+        self._log(message, "INFO", self.YELLOW if self.debug_mode else None)
+    
+    def success(self, message):
+        """Log success message"""
+        self._log(message, "INFO", self.GREEN if self.debug_mode else None)
+    
+    def status(self, message):
+        """Log status message (blue in debug mode)"""
+        self._log(message, "INFO", self.BLUE if self.debug_mode else None)
+
+# Global logger instance
+logger = Logger()
+
+# ==============================================================================
+# AVERAGE CLASS - Calculate running averages
+# ==============================================================================
+class Average:
+    """Calculate running average with memory limits"""
+    
+    def __init__(self, max_samples=30):
         self.samples = []
-        self.max_samples = 30
+        self.max_samples = min(100, max(1, max_samples))  # Limit between 1-100
 
-    def set_max_samples(self, max):
-        self.max_samples = max
-        if self.max_samples < 1:
-            self.max_samples = 1
+    def set_max_samples(self, max_samples):
+        """Set maximum number of samples to keep"""
+        self.max_samples = min(100, max(1, max_samples))
 
-    def update(self, new_value, scale = 0):
-        self.samples.append(new_value * (10 ** scale))
-        while (len(self.samples) > self.max_samples):
-            del self.samples[0]
-        Domoticz.Debug("Average: {} - {} values".format(self.get(), len(self.samples)))
+    def update(self, new_value, scale=0):
+        """Update with new value"""
+        if new_value is None:
+            logger.debug("Average.update: Rejecting None value")
+            return
+            
+        if not isinstance(new_value, (int, float)):
+            logger.debug(f"Average.update: Rejecting non-numeric value: {new_value}")
+            return
+            
+        scaled_value = new_value * (10 ** scale)
+        self.samples.append(scaled_value)
+        
+        # Prevent memory leak - enforce max_samples limit
+        while len(self.samples) > self.max_samples:
+            self.samples.pop(0)
+        
+        logger.debug(f"Average: {self.get()} - {len(self.samples)} values")
 
     def get(self):
+        """Get current average value"""
         if len(self.samples) == 0:
             return 0
         return int(sum(self.samples) / len(self.samples))
 
+# ==============================================================================
+# DEVICE CLASS
+# ==============================================================================
 class Dev:
-    def __init__(self,ID,name,nod,register,size=1,functioncode: int = 3,options=None, Used: int = 1, Description=None, signed: bool = False, TypeName=None,Type: int = 0, SubType:int = 0 , SwitchType:int = 0, multipler=1):
+    """Device representation with Modbus register mapping"""
+    
+    def __init__(self, ID, name, nod, register, size=1, functioncode=3, options=None, 
+                 Used=1, Description=None, signed=False, TypeName=None, 
+                 Type=0, SubType=0, SwitchType=0, multipler=1):
         self.ID = ID
         self.name = name
         self.TypeName = TypeName if TypeName is not None else ""
@@ -87,255 +202,401 @@ class Dev:
         self.multipler = multipler
         self.functioncode = functioncode
         self.options = options if options is not None else None
-        self.Used=Used
+        self.Used = Used
         self.Description = Description if Description is not None else ""
-        Domoticz.Log("DEV: "+self.name+" "+str(self.ID)+" "+self.TypeName+"  Description: "+str(self.Description))
+        
+        logger.debug(f"DEV: {self.name} ID:{self.ID} Type:{self.TypeName} Desc:{self.Description}")
+        
         if self.ID not in Devices:
-            msg = "Registering device: "+self.name+" "+str(self.ID)+" "+self.TypeName+"  Description: "+str(self.Description);
-            Domoticz.Log(msg)
+            logger.info(f"Registering device: {self.name} ID:{self.ID} Type:{self.TypeName}")
             if self.TypeName != "":
-                 Domoticz.Log("adding Dev with TypeName, "+self.TypeName)
-                 Domoticz.Device(Name=self.name, Unit=self.ID, TypeName=self.TypeName,Used=self.Used,Options=self.options,Description=self.Description).Create()
+                logger.debug(f"Adding device with TypeName: {self.TypeName}")
+                Domoticz.Device(Name=self.name, Unit=self.ID, TypeName=self.TypeName,
+                              Used=self.Used, Options=self.options, Description=self.Description).Create()
             else:
-                 Domoticz.Device(Name=self.name, Unit=self.ID,Type=self.Type, Subtype=self.SubType, Switchtype=self.SwitchType, Used=self.Used,Options=self.options,Description=self.Description).Create()
-                 Domoticz.Log("adding Dev with Type, "+str(self.Type))
+                logger.debug(f"Adding device with Type: {self.Type}")
+                Domoticz.Device(Name=self.name, Unit=self.ID, Type=self.Type, 
+                              Subtype=self.SubType, Switchtype=self.SwitchType, 
+                              Used=self.Used, Options=self.options, Description=self.Description).Create()
 
-    def UpdateSensorValue(self, modbusClient, isTCP, outerClass):
-        if isTCP: #pyModbus
-            Domoticz.Log("modbus client: "+str(modbusClient))
-            Domoticz.Log("SIZE: "+str(self.size))
-            
-            try:
-                # Read registers first
-                registers = modbusClient.read_holding_registers(self.register, self.size)
-                if not registers or len(registers) < self.size:
-                    Domoticz.Log(f"Failed to read {self.size} registers from {self.register} - skipping update")
-                    return
+    def read_modbus_value(self, modbus_client, is_tcp, plugin_instance):
+        """Read value from Modbus register"""
+        try:
+            if is_tcp:
+                # TCP Modbus using pyModbusTCP
+                logger.debug(f"Reading TCP Modbus: register={self.register:#x} size={self.size}")
                 
-                # FIXED: Use direct register access instead of deprecated BinaryPayloadDecoder
+                registers = modbus_client.read_holding_registers(self.register, self.size)
+                if not registers or len(registers) < self.size:
+                    raise Exception(f"Failed to read {self.size} registers from {self.register:#x}")
+                
                 if self.size == 1:
-                    Domoticz.Log("SIZE 1")
-                    result = registers[0]  # Direct 16-bit access
+                    result = registers[0]
                 elif self.size == 2:
-                    Domoticz.Log("SIZE 2")
                     # Convert two 16-bit registers to 32-bit value (Big Endian)
                     result = (registers[0] << 16) | registers[1]
                 else:
-                    Domoticz.Log(f"Unsupported register size: {self.size}")
-                    return
-                    
-                Domoticz.Log("TCP Modbus read: register=" + str(self.register) + " size=" + str(self.size) + " functioncode=" + str(self.functioncode))
-                Domoticz.Log("value: "+str(result))
-
-                # Apply the multipler before updating the value
-                data = result * self.multipler
+                    raise Exception(f"Unsupported register size: {self.size}")
                 
-            except Exception as e:
-                Domoticz.Log(f"TCP Modbus read failed for {self.name}: {str(e)}")
-                return
+                logger.debug(f"TCP read successful: value={result}")
+                return result
                 
-        else:   # minimalmodbus - need access to outerClass.RS485
-            try:
+            else:
+                # RTU Modbus using minimalmodbus
                 if self.functioncode == 3 or self.functioncode == 4:
                     if self.size == 1:
-                        payload = outerClass.RS485.read_register(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                        result = plugin_instance.rs485.read_register(
+                            self.register, 
+                            number_of_decimals=self.nod,
+                            functioncode=self.functioncode,
+                            signed=self.signed
+                        )
                     elif self.size == 2:
-                        payload = outerClass.RS485.read_long(self.register,number_of_decimals=self.nod,functioncode=self.functioncode,signed=self.signed)
+                        result = plugin_instance.rs485.read_long(
+                            self.register,
+                            number_of_decimals=self.nod,
+                            functioncode=self.functioncode,
+                            signed=self.signed
+                        )
+                    else:
+                        raise Exception(f"Unsupported register size: {self.size}")
+                    
+                    logger.debug(f"RTU read from register {self.register:#x}: value={result} signed={self.signed}")
+                    return result
+                else:
+                    raise Exception(f"Unsupported function code: {self.functioncode}")
+                    
+        except Exception as e:
+            logger.error(f"Modbus read failed for {self.name}: {str(e)}")
+            raise
 
-                Domoticz.Log("DEV.UPDATUJE wartosc z rejestru: "+str(self.register)+" value: "+str(payload)+" signed: "+str(self.signed))
-                data = payload * self.multipler
+    def apply_multiplier(self, raw_value):
+        """Apply multiplier to raw value"""
+        final_value = raw_value * self.multipler
+        logger.debug(f"{self.name}: raw={raw_value} multiplier={self.multipler} final={final_value}")
+        return final_value
+
+    def update_averages(self, value, plugin_instance):
+        """Update averaging values for specific devices"""
+        if self.name == "PV_Generation_Total":
+            logger.debug("Updating value for PV_Generation_Total")
+            plugin_instance.production = int(value)
+            
+        elif self.name == "ActivePower_PCC_Total":
+            logger.debug("Updating averages for ActivePower_PCC_Total")
+            plugin_instance.active_power.update(int(value))
+            plugin_instance.forward_power.update(int(value))
+            
+        elif self.name == "ReactivePower_PCC_Total":
+            logger.debug("Updating ReactivePower_PCC_Total")
+            reactive_value = int(abs(value * 1000))
+            plugin_instance.reactive_power.update(reactive_value)
+
+    def update_domoticz_device(self, value, plugin_instance):
+        """Update Domoticz device with new value"""
+        try:
+            if self.name == "Total PV Energy":
+                # Special handling for Total PV Energy
+                logger.debug(f"Updating Total PV Energy, ID={self.ID}")
                 
-            except Exception as e:
-                Domoticz.Log(f"RTU Modbus read failed for {self.name}: {str(e)}")
-                return
-
-        if Parameters["Mode6"] == 'Debug':
-            Domoticz.Log("Device:"+self.name+" data="+str(data)+" from register: "+str(hex(self.register)) )
-
-        # mamy naszą wartość w 'data'
-
-        if (self.name == "PV_Generation_Total"):
-            Domoticz.Debug("DEBUG. Updating value for PV_Generation_Total")
-            outerClass.production=int(data)
-
-        if (self.name == "ActivePower_PCC_Total"):
-            Domoticz.Debug("DEBUG. Updating value and averages for ActivePower_PCC_Total")
-            outerClass.active_power.update(int(data))
-            outerClass.forward_power.update(int(data))
-
-        if (self.name == "ReactivePower_PCC_Total"):
-            Domoticz.Debug("DEBUG. ReactivePower_PCC_Total")
-            v=int(abs( data*1000))
-            outerClass.reactive_power.update(v)
-
-        if (self.name == "Total PV Energy"):
-            Domoticz.Debug("DEBUG. Total PV Energy, ID="+str(self.ID))
-            USAGE1=str(0)
-            USAGE2=str(0)
-            RETURN1=str(0)
-            RETURN2=str(0)
-            CONS=str(0)
-            PROD=str(0)
-
-            POWER = int(outerClass.active_power.get())
-            Domoticz.Debug("DEBUG in UpdateValue, "+self.name+" POWER: "+str(POWER))
-            CONS1 = str(abs(outerClass.reverse_power.get()))
-            PROD1 = str(abs(outerClass.forward_power.get()))
-            Domoticz.Log("TUTAJ DEBUG, CONS1:"+str(CONS1)+" PROD1:"+str(PROD1) )
-            RETURN1=str(outerClass.production)
-            PROD=str(abs(outerClass.forward_power.get()))
-
-            Domoticz.Log("TUTAJ DEBUG in UpdateValue, "+self.name+" USAGE1: "+USAGE1+" USAGE2: "+USAGE2+" RETURN1: "+RETURN1+" RETURN2: "+RETURN2+" CONS: "+CONS+" PROD: "+PROD)
-
-            Devices[self.ID].Update(nValue=1,sValue=str(USAGE1+';'+USAGE2+';'+RETURN1+';'+RETURN2+';'+CONS+';'+PROD) )
-        else:
-            Domoticz.Debug("DEBUG. ELSE, ID="+str(self.ID))
-            # Special handling for P1 Smart Meter devices (Type 250)
-            if self.Type == 250:
-                # P1 Smart Meter requires sValue format: "usage1;usage2;return1;return2;cons;prod"
-                sValue = f"0;0;0;0;{data};0"
-                Devices[self.ID].Update(nValue=0, sValue=sValue)
-                Domoticz.Debug(f"P1 Smart Meter update: {self.name} = {sValue}")
+                usage1 = "0"
+                usage2 = "0"
+                return1 = str(plugin_instance.production)
+                return2 = "0"
+                cons = "0"
+                prod = str(abs(plugin_instance.forward_power.get()))
+                
+                s_value = f"{usage1};{usage2};{return1};{return2};{cons};{prod}"
+                logger.debug(f"Total PV Energy sValue: {s_value}")
+                
+                Devices[self.ID].Update(nValue=1, sValue=s_value)
+                
+            elif self.Type == 250:
+                # P1 Smart Meter requires specific format
+                s_value = f"0;0;0;0;{value};0"
+                logger.debug(f"P1 Smart Meter update: {self.name} = {s_value}")
+                Devices[self.ID].Update(nValue=0, sValue=s_value)
+                
             else:
-                Devices[self.ID].Update(sValue=str(data),nValue=int(data))
+                # Standard device update
+                Devices[self.ID].Update(sValue=str(value), nValue=int(value))
+                logger.debug(f"Updated {self.name} with value: {value}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update Domoticz device {self.name}: {str(e)}")
 
+    def UpdateSensorValue(self, modbus_client, is_tcp, plugin_instance):
+        """Main update method - orchestrates the update process"""
+        try:
+            # Step 1: Read raw value from Modbus
+            raw_value = self.read_modbus_value(modbus_client, is_tcp, plugin_instance)
+            
+            # Step 2: Apply multiplier
+            final_value = self.apply_multiplier(raw_value)
+            
+            # Step 3: Update averages if needed
+            self.update_averages(final_value, plugin_instance)
+            
+            # Step 4: Update Domoticz device
+            self.update_domoticz_device(final_value, plugin_instance)
+            
+            logger.debug(f"Successfully updated {self.name}: {final_value}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update sensor {self.name}: {str(e)}")
+
+# ==============================================================================
+# MAIN PLUGIN CLASS
+# ==============================================================================
 class BasePlugin:
+    """Main plugin class for Sofar Inverter"""
+    
     def __init__(self):
-        self.runInterval = 1
-        self.RS485 = ""
-        self.modbusClient = None
-        self.sensors = []  # Initialize empty sensors list
-        # Active power for last 5 minutes
-        self.active_power=Average()
-        # Reactive power for last 5 minutes
-        self.reactive_power=Average()
-        # Forward power for last 5 minutes
-        self.forward_power=Average()
-        self.reverse_power=Average()
-        self.consumption=0
-        self.production=0
-        return
+        self.run_interval = 1
+        self.rs485 = None
+        self.modbus_client = None
+        self.sensors = []
+        
+        # Averaging values
+        self.active_power = Average()
+        self.reactive_power = Average()
+        self.forward_power = Average()
+        self.reverse_power = Average()
+        
+        # Current values
+        self.consumption = 0
+        self.production = 0
 
     def onStart(self):
-        DumpConfigToLog()
-        DeviceID= int(Parameters["Mode2"])
+        """Initialize plugin on start"""
+        global logger
+        
+        # Setup debug mode
         if Parameters["Mode6"] == 'Debug':
-            Domoticz.Debugging(1)
-            Domoticz.Debug("Debugging mode is enabled")
-            
-        # Set up the Modbus client based on selected connection type
-        if Parameters["Mode4"] == "TCP":
-            self.modbusClient = ModbusClient(host=Parameters["Address"], port=int(Parameters["Port"]), unit_id=int(DeviceID), auto_open=True)
-            Domoticz.Log("Modbus TCP client created")
+            logger.set_debug_mode(True)
+            logger.debug("Debug mode enabled")
+            self._dump_config_to_log()
         else:
-            self.modbusClient = None
-            self.RS485 = minimalmodbus.Instrument(Parameters["SerialPort"], int(Parameters["Mode2"]))
-            self.RS485.serial.baudrate = Parameters["Mode1"]
-            self.RS485.serial.bytesize = 8
-            self.RS485.serial.parity = minimalmodbus.serial.PARITY_NONE
-            self.RS485.serial.stopbits = 1
-            self.RS485.serial.timeout = 1
-            self.RS485.debug = False
-            self.RS485.mode = minimalmodbus.MODE_RTU
+            logger.set_debug_mode(False)
+        
+        logger.info("Sofar Modbus plugin starting...")
+        
+        # Initialize Modbus connection
+        if not self._initialize_connection():
+            logger.error("Failed to initialize Modbus connection")
+            return
+        
+        # Initialize devices
+        self._initialize_devices()
+        
+        logger.success("Sofar plugin started successfully")
 
-        devicecreated = []
-        Domoticz.Log("Sofar-Modbus plugin start")
+    def _initialize_connection(self):
+        """Initialize Modbus connection (TCP or RTU)"""
+        device_id = int(Parameters["Mode2"])
+        
+        try:
+            if Parameters["Mode4"] == "TCP":
+                if ModbusClient is None:
+                    logger.error("pyModbusTCP module not installed! Install with: pip3 install pyModbusTCP")
+                    return False
+                    
+                self.modbus_client = ModbusClient(
+                    host=Parameters["Address"], 
+                    port=int(Parameters["Port"]), 
+                    unit_id=device_id, 
+                    auto_open=True
+                )
+                logger.info(f"Modbus TCP client created for {Parameters['Address']}:{Parameters['Port']}")
+                return True
+                
+            else:  # RTU
+                if minimalmodbus is None:
+                    logger.error("minimalmodbus module not installed! Install with: pip3 install minimalmodbus")
+                    return False
+                    
+                self.modbus_client = None
+                self.rs485 = minimalmodbus.Instrument(Parameters["SerialPort"], device_id)
+                self.rs485.serial.baudrate = Parameters["Mode1"]
+                self.rs485.serial.bytesize = 8
+                self.rs485.serial.parity = minimalmodbus.serial.PARITY_NONE
+                self.rs485.serial.stopbits = 1
+                self.rs485.serial.timeout = 1
+                self.rs485.debug = False
+                self.rs485.mode = minimalmodbus.MODE_RTU
+                logger.info(f"Modbus RTU client created on {Parameters['SerialPort']}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Connection initialization failed: {str(e)}")
+            return False
 
+    def _initialize_devices(self):
+        """Initialize device list"""
+        logger.info("Initializing Sofar devices...")
+        
         self.sensors = [
-            Dev(1, "Temperature_Env1", 0, 0x418, functioncode=3, TypeName="Temperature", Description="Temperature of Environment Sensor 1", signed=True),
-            Dev(9, "Temperature_Inv1", 0, 0x420, functioncode=3, TypeName="Temperature", Description="Temperature of Inverter Sensor 1", signed=True),
-            Dev(12, "GenerationTime_Today", 0, 0x426, functioncode=3, TypeName="Counter", SubType=5, Description="Generation Time for Today", signed=False),
-            Dev(13, "GenerationTime_Total", 0, 0x427, functioncode=3, TypeName="Counter", SubType=5, Description="Total Generation Time", signed=False),
-            Dev(15, "Frequency_grid", 2, 0x484, functioncode=3, TypeName="Custom", Description="Grid Frequency in Hz", options={"Custom": "1;Hz"}, multipler=0.01),
-            Dev(16, "ActivePower_Output_Total", 0, 0x485, functioncode=3, TypeName="Usage", Description="Total Active Power Output", signed=True, multipler=10),
-            Dev(17, "ReactivePower_Output_Total", 0, 0x486, functioncode=3, options={"Custom":"1;kVArh"},Type=250,SubType=6, Description="Total Reactive Power Output", signed=True, multipler=10),
-            Dev(19, "ActivePower_PCC_Total", 0, 0x488, functioncode=3, TypeName="Usage", Description="Total Active Power at PCC (Point of Common Coupling)", signed=True, multipler=10),
+            # Temperature sensors
+            Dev(1, "Temperature_Env1", 0, 0x418, functioncode=3, TypeName="Temperature", 
+                Description="Temperature of Environment Sensor 1", signed=True),
+            Dev(9, "Temperature_Inv1", 0, 0x420, functioncode=3, TypeName="Temperature", 
+                Description="Temperature of Inverter Sensor 1", signed=True),
+            
+            # Generation time
+            Dev(12, "GenerationTime_Today", 0, 0x426, functioncode=3, TypeName="Counter", 
+                SubType=5, Description="Generation Time for Today", signed=False),
+            Dev(13, "GenerationTime_Total", 0, 0x427, functioncode=3, TypeName="Counter", 
+                SubType=5, Description="Total Generation Time", signed=False),
+            
+            # Grid parameters
+            Dev(15, "Frequency_grid", 2, 0x484, functioncode=3, TypeName="Custom", 
+                Description="Grid Frequency in Hz", options={"Custom": "1;Hz"}, multipler=0.01),
+            Dev(16, "ActivePower_Output_Total", 0, 0x485, functioncode=3, TypeName="Usage", 
+                Description="Total Active Power Output", signed=True, multipler=10),
+            Dev(17, "ReactivePower_Output_Total", 0, 0x486, functioncode=3, 
+                options={"Custom":"1;kVArh"}, Type=250, SubType=6, 
+                Description="Total Reactive Power Output", signed=True, multipler=10),
+            Dev(19, "ActivePower_PCC_Total", 0, 0x488, functioncode=3, TypeName="Usage", 
+                Description="Total Active Power at PCC", signed=True, multipler=10),
 
             # Phase R
-            Dev(22, "Voltage_Phase_R", 1, 0x48D, functioncode=3, TypeName="Voltage", Description="Voltage of Phase R", multipler=0.1),
-            Dev(23, "Current_Output_R", 0, 0x48E, functioncode=3, Type=243, SubType=23, Description="Current Output of Phase R", multipler=0.01),
-            Dev(24, "ActivePower_Output_R", 0, 0x48F, functioncode=3, TypeName="Usage", Description="Active Power Output of Phase R", signed=True, multipler=10),
+            Dev(22, "Voltage_Phase_R", 1, 0x48D, functioncode=3, TypeName="Voltage", 
+                Description="Voltage of Phase R", multipler=0.1),
+            Dev(23, "Current_Output_R", 0, 0x48E, functioncode=3, Type=243, SubType=23, 
+                Description="Current Output of Phase R", multipler=0.01),
+            Dev(24, "ActivePower_Output_R", 0, 0x48F, functioncode=3, TypeName="Usage", 
+                Description="Active Power Output of Phase R", signed=True, multipler=10),
 
             # Phase S
-            Dev(31, "Voltage_Phase_S", 1, 0x498, functioncode=3, TypeName="Voltage", Description="Voltage of Phase S", multipler=0.1),
-            Dev(32, "Current_Output_S", 0, 0x499, functioncode=3, Type=243, SubType=23, Description="Current Output of Phase S", multipler=0.01),
-            Dev(33, "ActivePower_Output_S", 0, 0x49A, functioncode=3, TypeName="Usage", Description="Active Power Output of Phase S", signed=True, multipler=10),
+            Dev(31, "Voltage_Phase_S", 1, 0x498, functioncode=3, TypeName="Voltage", 
+                Description="Voltage of Phase S", multipler=0.1),
+            Dev(32, "Current_Output_S", 0, 0x499, functioncode=3, Type=243, SubType=23, 
+                Description="Current Output of Phase S", multipler=0.01),
+            Dev(33, "ActivePower_Output_S", 0, 0x49A, functioncode=3, TypeName="Usage", 
+                Description="Active Power Output of Phase S", signed=True, multipler=10),
 
             # Phase T
-            Dev(40, "Voltage_Phase_T", 1, 0x4A3, functioncode=3, TypeName="Voltage", Description="Voltage of Phase T", multipler=0.1),
-            Dev(41, "Current_Output_T", 0, 0x4A4, functioncode=3, Type=243, SubType=23, Description="Current Output of Phase T", signed=True, multipler=0.01),
-            Dev(42, "ActivePower_Output_T", 0, 0x4A5, functioncode=3, TypeName="Usage", Description="Active Power Output of Phase T", signed=True, multipler=10),
+            Dev(40, "Voltage_Phase_T", 1, 0x4A3, functioncode=3, TypeName="Voltage", 
+                Description="Voltage of Phase T", multipler=0.1),
+            Dev(41, "Current_Output_T", 0, 0x4A4, functioncode=3, Type=243, SubType=23, 
+                Description="Current Output of Phase T", multipler=0.01),
+            Dev(42, "ActivePower_Output_T", 0, 0x4A5, functioncode=3, TypeName="Usage", 
+                Description="Active Power Output of Phase T", signed=True, multipler=10),
 
             # PV Data
-            Dev(69, "Voltage_PV1", 1, 0x584, functioncode=3, TypeName="Voltage", Description="Voltage of PV Panel 1", multipler=0.1),
-            Dev(70, "Current_PV1", 0, 0x585, functioncode=3, Type=243, SubType=23, Description="Current of PV Panel 1", multipler=0.01),
-            Dev(71, "Power_PV1", 0, 0x586, functioncode=3, TypeName="Usage", Description="Power Generated by PV Panel 1", signed=True, multipler=10),
-            Dev(72, "Voltage_PV2", 1, 0x587, functioncode=3, TypeName="Voltage", Description="Voltage of PV Panel 2", multipler=0.1),
-            Dev(73, "Current_PV2", 0, 0x588, functioncode=3, Type=243, SubType=23, Description="Current of PV Panel 2", multipler=0.01),
-            Dev(74, "Power_PV2", 0, 0x589, functioncode=3, TypeName="Usage", Description="Power Generated by PV Panel 2", signed=True, multipler=10),
+            Dev(69, "Voltage_PV1", 1, 0x584, functioncode=3, TypeName="Voltage", 
+                Description="Voltage of PV Panel 1", multipler=0.1),
+            Dev(70, "Current_PV1", 0, 0x585, functioncode=3, Type=243, SubType=23, 
+                Description="Current of PV Panel 1", multipler=0.01),
+            Dev(71, "Power_PV1", 0, 0x586, functioncode=3, TypeName="Usage", 
+                Description="Power Generated by PV Panel 1", signed=True, multipler=10),
+            Dev(72, "Voltage_PV2", 1, 0x587, functioncode=3, TypeName="Voltage", 
+                Description="Voltage of PV Panel 2", multipler=0.1),
+            Dev(73, "Current_PV2", 0, 0x588, functioncode=3, Type=243, SubType=23, 
+                Description="Current of PV Panel 2", multipler=0.01),
+            Dev(74, "Power_PV2", 0, 0x589, functioncode=3, TypeName="Usage", 
+                Description="Power Generated by PV Panel 2", signed=True, multipler=10),
 
             # PV Generation
-            Dev(81, "PV_Generation_Today", 2, 0x684, size=2, functioncode=3, TypeName="Usage", Description="Total PV Generation Today", signed=False, multipler=10),
-            Dev(82, "PV_Generation_Total", 2, 0x686, size=2, functioncode=3, TypeName="Usage", Description="Total PV Generation to Date", signed=False, multipler=10),
+            Dev(81, "PV_Generation_Today", 2, 0x684, size=2, functioncode=3, TypeName="Usage", 
+                Description="Total PV Generation Today", signed=False, multipler=10),
+            Dev(82, "PV_Generation_Total", 2, 0x686, size=2, functioncode=3, TypeName="Usage", 
+                Description="Total PV Generation to Date", signed=False, multipler=10),
 
             # Load Consumption
-            Dev(83, "Load_Consumption_Today", 2, 0x688, functioncode=3, TypeName="Usage", Description="Total Load Consumption Today", signed=True),
-            Dev(84, "Load_Consumption_Total", 2, 0x68A, functioncode=3, TypeName="Usage", Description="Total Load Consumption to Date", signed=True),
-            Dev(85, "Total PV power", 0, 0x5C4, functioncode=3, TypeName="Usage", Description="Total PV power", signed=True, multipler=100),
-            # virtual device, not updating from register
-            Dev(86, "Total PV Energy", 0, 0, functioncode=3, Type=250, SubType=1, Description="Total PV power", signed=True, multipler=100)
+            Dev(83, "Load_Consumption_Today", 2, 0x688, functioncode=3, TypeName="Usage", 
+                Description="Total Load Consumption Today", signed=True),
+            Dev(84, "Load_Consumption_Total", 2, 0x68A, functioncode=3, TypeName="Usage", 
+                Description="Total Load Consumption to Date", signed=True),
+            Dev(85, "Total PV power", 0, 0x5C4, functioncode=3, TypeName="Usage", 
+                Description="Total PV power", signed=True, multipler=100),
+            
+            # Virtual device (not updating from register)
+            Dev(86, "Total PV Energy", 0, 0, functioncode=3, Type=250, SubType=1, 
+                Description="Total PV power virtual", signed=True, multipler=100)
         ]
+        
+        logger.info(f"Initialized {len(self.sensors)} devices")
 
     def onStop(self):
-        Domoticz.Log("onStop called")
-        Domoticz.Debugging(0)
-        Domoticz.Debug("onStop called")
+        """Clean up on plugin stop"""
+        logger.info("Sofar plugin stopping...")
+        logger.set_debug_mode(False)
 
     def onHeartbeat(self):
-        self.runInterval -=1;
-        pluginClass = self
-        if self.runInterval <= 0:
-            for dev in self.sensors:
-                dev.UpdateSensorValue(self.modbusClient, Parameters["Mode4"] == "TCP",pluginClass)
+        """Called every 10 seconds by Domoticz"""
+        self.run_interval -= 1
+        
+        if self.run_interval <= 0:
+            # Reset interval
+            self.run_interval = int(Parameters["Mode3"])
+            logger.debug(f"Resetting run_interval to: {self.run_interval}")
+            
+            # Update all sensors
+            self._update_all_sensors()
 
-                if self.runInterval <= 0:
-                    self.runInterval = int(Parameters["Mode3"])
-                    if Parameters["Mode6"] == 'Debug':
-                        Domoticz.Debug("Resetting runInterval to: "+str(self.runInterval))
-        return True
+    def _update_all_sensors(self):
+        """Update all sensor values"""
+        is_tcp = (Parameters["Mode4"] == "TCP")
+        
+        for sensor in self.sensors:
+            try:
+                sensor.UpdateSensorValue(self.modbus_client, is_tcp, self)
+            except Exception as e:
+                logger.error(f"Failed to update sensor {sensor.name}: {str(e)}")
 
+    def _dump_config_to_log(self):
+        """Dump configuration to log for debugging"""
+        logger.debug("=== Configuration ===")
+        for key in Parameters:
+            if Parameters[key] != "":
+                logger.debug(f"{key}: {Parameters[key]}")
+        
+        logger.debug(f"Device count: {len(Devices)}")
+        for device_id in Devices:
+            device = Devices[device_id]
+            logger.debug(f"Device {device_id}: {device.Name} - Value: {device.sValue}")
+
+# ==============================================================================
+# GLOBAL PLUGIN INSTANCE AND DOMOTICZ CALLBACKS
+# ==============================================================================
 global _plugin
 _plugin = BasePlugin()
 
 def onStart():
+    """Domoticz callback: Plugin start"""
     global _plugin
     _plugin.onStart()
 
 def onStop():
+    """Domoticz callback: Plugin stop"""
     global _plugin
     _plugin.onStop()
 
 def onHeartbeat():
+    """Domoticz callback: Heartbeat"""
     global _plugin
-    Domoticz.Log("onHeartbeat called")
     _plugin.onHeartbeat()
 
 def onCommand(Unit, Command, Level, Hue):
+    """Domoticz callback: Command received"""
     global _plugin
-    Domoticz.Log("onCommand called")
-    _plugin.onCommand(Unit, Command, Level, Hue)
+    logger.debug("onCommand called")
+    # Add command handling if needed
 
-# Generic helper functions
-def DumpConfigToLog():
-    for x in Parameters:
-        if Parameters[x] != "":
-            Domoticz.Log("'" + x + "':'" + str(Parameters[x]) + "'")
-    Domoticz.Log("Device count: " + str(len(Devices)))
-    for x in Devices:
-        Domoticz.Log("Device:           " + str(x) + " - " + str(Devices[x]))
-        Domoticz.Log("Device ID:       '" + str(Devices[x].ID) + "'")
-        Domoticz.Log("Device Name:     '" + Devices[x].Name + "'")
-        Domoticz.Log("Device nValue:    " + str(Devices[x].nValue))
-        Domoticz.Log("Device sValue:   '" + Devices[x].sValue + "'")
-        Domoticz.Log("Device LastLevel: " + str(Devices[x].LastLevel))
-    return
+# Additional required Domoticz callbacks
+def onConnect(Connection, Status, Description):
+    """Domoticz callback: Connection status"""
+    pass
+
+def onMessage(Connection, Data):
+    """Domoticz callback: Message received"""
+    pass
+
+def onNotification(Name, Subject, Text, Status, Priority, Sound, ImageFile):
+    """Domoticz callback: Notification"""
+    pass
+
+def onDisconnect(Connection):
+    """Domoticz callback: Disconnection"""
+    pass
