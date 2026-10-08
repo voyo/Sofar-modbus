@@ -607,7 +607,7 @@ class BasePlugin:
             Dev(16, "ActivePower_Output_Total", 0, 0x485, functioncode=3, TypeName="Usage", 
                 Description="Total Active Power Output", signed=True, multipler=10),
             Dev(17, "ReactivePower_Output_Total", 0, 0x486, functioncode=3, 
-                options={"Custom":"1;kVArh"}, Type=250, SubType=6, 
+                options={"Custom":"1;kVArh"}, Type=250, SubType=1, 
                 Description="Total Reactive Power Output", signed=True, multipler=10),
             Dev(19, "ActivePower_PCC_Total", 0, 0x488, functioncode=3, TypeName="Usage", 
                 Description="Total Active Power at PCC", signed=True, multipler=10),
